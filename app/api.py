@@ -24,13 +24,16 @@ def cancel_escalation_task(shift_id: str) -> None:
     """Cancel the escalation task for a shift (e.g., when claimed)."""
     task = _escalation_tasks.pop(shift_id, None)
     if task is not None and not task.done():
-        task.cancel()
+        try:
+            task.cancel()
+        except RuntimeError:
+            # Event loop may be closed during test teardown
+            pass
 
 
-def cancel_all_escalation_tasks() -> None:
-    """Cancel all pending escalation tasks (useful for test cleanup)."""
-    for shift_id in list(_escalation_tasks.keys()):
-        cancel_escalation_task(shift_id)
+def clear_escalation_tasks() -> None:
+    """Clear all escalation task references (for test cleanup)."""
+    _escalation_tasks.clear()
 
 
 async def _get_claim_lock(shift_id: str) -> asyncio.Lock:
