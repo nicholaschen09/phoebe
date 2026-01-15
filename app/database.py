@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import json
 from collections.abc import Iterator, MutableMapping
+from pathlib import Path
 from typing import TypeVar
 
 from app.models import Caregiver, Shift, ShiftFanout
@@ -78,3 +80,21 @@ def get_db() -> Database:
     if _db is None:
         _db = Database()
     return _db
+
+
+def load_sample_data(db: Database | None = None) -> None:
+    """Load sample data from sample_data.json into the database."""
+    if db is None:
+        db = get_db()
+
+    sample_data_path = Path(__file__).parent.parent / "sample_data.json"
+    with open(sample_data_path) as f:
+        data = json.load(f)
+
+    for caregiver_data in data["caregivers"]:
+        caregiver = Caregiver(**caregiver_data)
+        db.caregivers.put(caregiver.id, caregiver)
+
+    for shift_data in data["shifts"]:
+        shift = Shift(**shift_data)
+        db.shifts.put(shift.id, shift)
