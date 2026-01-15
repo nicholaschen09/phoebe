@@ -5,7 +5,7 @@ import pytest
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 
-from app.api import create_app
+from app.api import cancel_all_escalation_tasks, create_app
 from app.database import get_db, load_sample_data
 from app.models import ShiftFanoutStatus
 
@@ -24,7 +24,7 @@ async def client():
 
 @pytest_asyncio.fixture(autouse=True)
 def reset_db():
-    """Reset database before each test."""
+    """Reset database and cancel pending tasks before each test."""
     import app.database
 
     app.database._db = None
@@ -34,6 +34,8 @@ def reset_db():
     db.fanouts.clear()
     load_sample_data()
     yield
+    # Clean up any pending escalation tasks after test
+    cancel_all_escalation_tasks()
 
 
 @pytest.mark.asyncio

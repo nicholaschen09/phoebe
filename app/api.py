@@ -15,8 +15,22 @@ router = APIRouter()
 
 _claim_locks: dict[str, asyncio.Lock] = {}
 _locks_lock = asyncio.Lock()
+_escalation_tasks: dict[str, asyncio.Task] = {}
 
 ESCALATION_DELAY_SECONDS = 600  # 10 minutes
+
+
+def cancel_escalation_task(shift_id: str) -> None:
+    """Cancel the escalation task for a shift (e.g., when claimed)."""
+    task = _escalation_tasks.pop(shift_id, None)
+    if task is not None and not task.done():
+        task.cancel()
+
+
+def cancel_all_escalation_tasks() -> None:
+    """Cancel all pending escalation tasks (useful for test cleanup)."""
+    for shift_id in list(_escalation_tasks.keys()):
+        cancel_escalation_task(shift_id)
 
 
 async def _get_claim_lock(shift_id: str) -> asyncio.Lock:
@@ -82,7 +96,8 @@ async def fanout_shift(shift_id: str) -> dict[str, str]:
     )
     db.fanouts.put(shift_id, fanout)
 
-    _ = asyncio.create_task(_schedule_escalation(shift_id, now))
+    task = asyncio.create_task(_schedule_escalation(shift_id, now))
+    _escalation_tasks[shift_id] = task
 
     return {
         "status": "fanout_initiated",
@@ -179,6 +194,9 @@ async def handle_inbound_message(message: InboundMessage) -> dict[str, str]:
         fanout.status = ShiftFanoutStatus.CLAIMED
         fanout.claimed_by = caregiver.id
         db.fanouts.put(fanout.shift_id, fanout)
+
+        # Cancel the escalation task since shift is claimed
+        cancel_escalation_task(fanout.shift_id)
 
     return {
         "status": "shift_claimed",
