@@ -1,9 +1,8 @@
 import asyncio
-from datetime import UTC, timedelta
+from datetime import UTC
 
 import pytest
 import pytest_asyncio
-from freezegun import freeze_time
 from httpx import ASGITransport, AsyncClient
 
 from app.api import create_app
@@ -231,10 +230,16 @@ async def test_inbound_message_no_pending_shift(client: AsyncClient) -> None:
 
 @pytest.mark.asyncio
 async def test_escalation_phone_calls_sent(client: AsyncClient) -> None:
-    """Test that phone calls are sent after 10 minutes if shift not claimed."""
+    """Test that phone calls are sent after escalation delay if shift not claimed."""
+    import app.api
+
     shift_id = "f5a9d844-ecff-4f7a-8ef7-d091f22ad77e"
 
-    with freeze_time("2025-07-02 00:00:00") as frozen_time:
+    # Use a very short escalation delay for testing
+    original_delay = app.api.ESCALATION_DELAY_SECONDS
+    app.api.ESCALATION_DELAY_SECONDS = 0.1  # 100ms for test
+
+    try:
         await client.post(f"/shifts/{shift_id}/fanout")
 
         db_instance = get_db()
@@ -242,23 +247,36 @@ async def test_escalation_phone_calls_sent(client: AsyncClient) -> None:
         assert fanout.status == ShiftFanoutStatus.PENDING
         assert fanout.phone_call_sent_at is None
 
-        frozen_time.tick(delta=timedelta(minutes=10, seconds=1))
-
-        await asyncio.sleep(0.1)
+        # Wait for escalation to complete (delay + phone call time)
+        # Poll until escalation happens
+        for _ in range(50):  # 50 * 0.1s = 5s max wait
+            await asyncio.sleep(0.1)
+            fanout = db_instance.fanouts.get(shift_id)
+            if fanout.status == ShiftFanoutStatus.ESCALATED:
+                break
 
         fanout = db_instance.fanouts.get(shift_id)
         assert fanout.status == ShiftFanoutStatus.ESCALATED
         assert fanout.phone_call_sent_at is not None
+    finally:
+        app.api.ESCALATION_DELAY_SECONDS = original_delay
 
 
 @pytest.mark.asyncio
 async def test_escalation_skipped_if_claimed(client: AsyncClient) -> None:
     """Test that escalation doesn't happen if shift is already claimed."""
+    import app.api
+
     shift_id = "f5a9d844-ecff-4f7a-8ef7-d091f22ad77e"
 
-    with freeze_time("2025-07-02 00:00:00") as frozen_time:
+    # Use a short escalation delay for testing
+    original_delay = app.api.ESCALATION_DELAY_SECONDS
+    app.api.ESCALATION_DELAY_SECONDS = 0.2  # 200ms for test
+
+    try:
         await client.post(f"/shifts/{shift_id}/fanout")
 
+        # Claim the shift before escalation happens
         message = {"from_phone": "+15550001", "message": "yes"}
         await client.post("/messages/inbound", json=message)
 
@@ -266,13 +284,15 @@ async def test_escalation_skipped_if_claimed(client: AsyncClient) -> None:
         fanout = db_instance.fanouts.get(shift_id)
         assert fanout.status == ShiftFanoutStatus.CLAIMED
 
-        frozen_time.tick(delta=timedelta(minutes=10, seconds=1))
+        # Wait past the escalation delay
+        await asyncio.sleep(0.5)
 
-        await asyncio.sleep(0.1)
-
+        # Verify escalation didn't happen since shift was claimed
         fanout = db_instance.fanouts.get(shift_id)
         assert fanout.status == ShiftFanoutStatus.CLAIMED
         assert fanout.phone_call_sent_at is None
+    finally:
+        app.api.ESCALATION_DELAY_SECONDS = original_delay
 
 
 @pytest.mark.asyncio

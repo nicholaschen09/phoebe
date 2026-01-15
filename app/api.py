@@ -16,6 +16,9 @@ router = APIRouter()
 _claim_locks: dict[str, asyncio.Lock] = {}
 _locks_lock = asyncio.Lock()
 
+# Configurable escalation delay (in seconds) - allows shorter delays for testing
+ESCALATION_DELAY_SECONDS = 600  # 10 minutes
+
 
 async def _get_claim_lock(shift_id: str) -> asyncio.Lock:
     """Get or create a lock for a specific shift to prevent race conditions."""
@@ -89,8 +92,8 @@ async def fanout_shift(shift_id: str) -> dict[str, str]:
 
 
 async def _schedule_escalation(shift_id: str, created_at: datetime) -> None:
-    """Schedule phone call escalation after 10 minutes if shift not claimed."""
-    await asyncio.sleep(600)
+    """Schedule phone call escalation after configured delay if shift not claimed."""
+    await asyncio.sleep(ESCALATION_DELAY_SECONDS)
 
     db = get_db()
     fanout = db.fanouts.get(shift_id)
