@@ -1,8 +1,5 @@
-from datetime import UTC, datetime, timedelta
-
 import pytest
 import pytest_asyncio
-from freezegun import freeze_time
 from httpx import ASGITransport, AsyncClient
 
 from app.api import create_app
@@ -24,10 +21,9 @@ async def client():
 @pytest_asyncio.fixture(autouse=True)
 def reset_db():
     """Reset database before each test."""
-    from app.database import _db
+    import app.database
 
-    global _db
-    _db = None
+    app.database._db = None
     db = get_db()
     db.shifts.clear()
     db.caregivers.clear()
