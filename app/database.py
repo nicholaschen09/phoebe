@@ -1,5 +1,9 @@
+from __future__ import annotations
+
 from collections.abc import Iterator, MutableMapping
 from typing import TypeVar
+
+from app.models import Caregiver, Shift, ShiftFanout
 
 K = TypeVar("K")
 V = TypeVar("V")
@@ -33,3 +37,44 @@ class InMemoryKeyValueDatabase[K, V]:
 
     def __len__(self) -> int:
         return len(self._store)
+
+
+class Database:
+    """Container for all database instances."""
+
+    def __init__(self) -> None:
+        self.shifts: InMemoryKeyValueDatabase[str, Shift] = (
+            InMemoryKeyValueDatabase()
+        )
+        self.caregivers: InMemoryKeyValueDatabase[str, Caregiver] = (
+            InMemoryKeyValueDatabase()
+        )
+        self.fanouts: InMemoryKeyValueDatabase[str, ShiftFanout] = (
+            InMemoryKeyValueDatabase()
+        )
+
+    def get_caregivers_by_role(self, role: str) -> list[Caregiver]:
+        """Get all caregivers with a specific role."""
+        return [
+            caregiver
+            for caregiver in self.caregivers.all()
+            if caregiver.role == role
+        ]
+
+    def get_caregiver_by_phone(self, phone: str) -> Caregiver | None:
+        """Get a caregiver by their phone number."""
+        for caregiver in self.caregivers.all():
+            if caregiver.phone == phone:
+                return caregiver
+        return None
+
+
+_db: Database | None = None
+
+
+def get_db() -> Database:
+    """Get the global database instance."""
+    global _db
+    if _db is None:
+        _db = Database()
+    return _db
