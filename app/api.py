@@ -80,7 +80,7 @@ async def fanout_shift(shift_id: str) -> dict[str, str]:
     )
     db.fanouts.put(shift_id, fanout)
 
-    asyncio.create_task(_schedule_escalation(shift_id, now))
+    _ = asyncio.create_task(_schedule_escalation(shift_id, now))
 
     return {
         "status": "fanout_initiated",
@@ -145,15 +145,21 @@ async def handle_inbound_message(message: InboundMessage) -> dict[str, str]:
         }
 
     fanout = None
+    claimed_fanout = None
     for f in db.fanouts.all():
-        if (
-            caregiver.id in f.contacted_caregiver_ids
-            and f.status == ShiftFanoutStatus.PENDING
-        ):
-            fanout = f
-            break
+        if caregiver.id in f.contacted_caregiver_ids:
+            if f.status == ShiftFanoutStatus.PENDING:
+                fanout = f
+                break
+            elif f.status == ShiftFanoutStatus.CLAIMED:
+                claimed_fanout = f
 
     if fanout is None:
+        if claimed_fanout is not None:
+            return {
+                "status": "shift_already_claimed",
+                "message": "This shift has already been claimed",
+            }
         return {
             "status": "no_pending_shift",
             "message": "No pending shift found for this caregiver",
