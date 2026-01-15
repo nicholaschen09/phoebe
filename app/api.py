@@ -27,7 +27,6 @@ def cancel_escalation_task(shift_id: str) -> None:
         try:
             task.cancel()
         except RuntimeError:
-            # Event loop may be closed during test teardown
             pass
 
 
@@ -198,7 +197,6 @@ async def handle_inbound_message(message: InboundMessage) -> dict[str, str]:
         fanout.claimed_by = caregiver.id
         db.fanouts.put(fanout.shift_id, fanout)
 
-        # Cancel the escalation task since shift is claimed
         cancel_escalation_task(fanout.shift_id)
 
     return {
