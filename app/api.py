@@ -16,7 +16,6 @@ router = APIRouter()
 _claim_locks: dict[str, asyncio.Lock] = {}
 _locks_lock = asyncio.Lock()
 
-# Configurable escalation delay (in seconds) - allows shorter delays for testing
 ESCALATION_DELAY_SECONDS = 600  # 10 minutes
 
 
