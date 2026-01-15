@@ -1,9 +1,14 @@
+import asyncio
+from datetime import UTC, timedelta
+
 import pytest
 import pytest_asyncio
+from freezegun import freeze_time
 from httpx import ASGITransport, AsyncClient
 
 from app.api import create_app
 from app.database import get_db, load_sample_data
+from app.models import ShiftFanoutStatus
 
 
 @pytest_asyncio.fixture
@@ -148,3 +153,163 @@ async def test_race_condition_prevention(client: AsyncClient) -> None:
     db_instance = get_db()
     fanout = db_instance.fanouts.get(shift_id)
     assert fanout.claimed_by == "27e8d156-7fee-4f79-94d7-b45d306724d4"
+
+
+@pytest.mark.asyncio
+async def test_fanout_no_matching_caregivers(client: AsyncClient) -> None:
+    """Test fanout returns 404 when no caregivers match the required role."""
+    from datetime import datetime
+
+    from app.models import Shift
+
+    db = get_db()
+    shift_id = "test-shift-no-caregivers"
+
+    shift = Shift(
+        id=shift_id,
+        organization_id="test-org",
+        role_required="CNA",
+        start_time=datetime(2025, 7, 2, 8, 0, 0, tzinfo=UTC),
+        end_time=datetime(2025, 7, 2, 16, 0, 0, tzinfo=UTC),
+    )
+    db.shifts.put(shift_id, shift)
+
+    response = await client.post(f"/shifts/{shift_id}/fanout")
+    assert response.status_code == 404
+    assert "No caregivers found" in response.json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_fanout_multiple_caregivers_same_role(
+    client: AsyncClient,
+) -> None:
+    """Test fanout contacts all caregivers with matching role."""
+    shift_id = "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+
+    response = await client.post(f"/shifts/{shift_id}/fanout")
+    assert response.status_code == 200
+
+    db_instance = get_db()
+    fanout = db_instance.fanouts.get(shift_id)
+    assert fanout is not None
+    assert len(fanout.contacted_caregiver_ids) == 2
+
+
+@pytest.mark.asyncio
+async def test_inbound_message_unknown_intent(client: AsyncClient) -> None:
+    """Test handling of UNKNOWN intent messages."""
+    shift_id = "f5a9d844-ecff-4f7a-8ef7-d091f22ad77e"
+
+    await client.post(f"/shifts/{shift_id}/fanout")
+
+    message = {
+        "from_phone": "+15550001",
+        "message": "maybe",
+    }
+    response = await client.post("/messages/inbound", json=message)
+    assert response.status_code == 200
+    data = response.json()
+    assert data["status"] == "processed"
+
+    db_instance = get_db()
+    fanout = db_instance.fanouts.get(shift_id)
+    assert fanout.status.value == "pending"
+
+
+@pytest.mark.asyncio
+async def test_inbound_message_no_pending_shift(client: AsyncClient) -> None:
+    """Test message from caregiver with no pending shifts."""
+    message = {
+        "from_phone": "+15550001",
+        "message": "yes",
+    }
+    response = await client.post("/messages/inbound", json=message)
+    assert response.status_code == 200
+    data = response.json()
+    assert data["status"] == "no_pending_shift"
+
+
+@pytest.mark.asyncio
+async def test_escalation_phone_calls_sent(client: AsyncClient) -> None:
+    """Test that phone calls are sent after 10 minutes if shift not claimed."""
+    shift_id = "f5a9d844-ecff-4f7a-8ef7-d091f22ad77e"
+
+    with freeze_time("2025-07-02 00:00:00") as frozen_time:
+        await client.post(f"/shifts/{shift_id}/fanout")
+
+        db_instance = get_db()
+        fanout = db_instance.fanouts.get(shift_id)
+        assert fanout.status == ShiftFanoutStatus.PENDING
+        assert fanout.phone_call_sent_at is None
+
+        frozen_time.tick(delta=timedelta(minutes=10, seconds=1))
+
+        await asyncio.sleep(0.1)
+
+        fanout = db_instance.fanouts.get(shift_id)
+        assert fanout.status == ShiftFanoutStatus.ESCALATED
+        assert fanout.phone_call_sent_at is not None
+
+
+@pytest.mark.asyncio
+async def test_escalation_skipped_if_claimed(client: AsyncClient) -> None:
+    """Test that escalation doesn't happen if shift is already claimed."""
+    shift_id = "f5a9d844-ecff-4f7a-8ef7-d091f22ad77e"
+
+    with freeze_time("2025-07-02 00:00:00") as frozen_time:
+        await client.post(f"/shifts/{shift_id}/fanout")
+
+        message = {"from_phone": "+15550001", "message": "yes"}
+        await client.post("/messages/inbound", json=message)
+
+        db_instance = get_db()
+        fanout = db_instance.fanouts.get(shift_id)
+        assert fanout.status == ShiftFanoutStatus.CLAIMED
+
+        frozen_time.tick(delta=timedelta(minutes=10, seconds=1))
+
+        await asyncio.sleep(0.1)
+
+        fanout = db_instance.fanouts.get(shift_id)
+        assert fanout.status == ShiftFanoutStatus.CLAIMED
+        assert fanout.phone_call_sent_at is None
+
+
+@pytest.mark.asyncio
+async def test_multiple_caregivers_race_condition(client: AsyncClient) -> None:
+    """Test that only one caregiver wins when multiple try to claim simultaneously."""
+    shift_id = "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+
+    await client.post(f"/shifts/{shift_id}/fanout")
+
+    message1 = {"from_phone": "+15550002", "message": "yes"}
+    message2 = {"from_phone": "+15550003", "message": "yes"}
+
+    responses = await asyncio.gather(
+        client.post("/messages/inbound", json=message1),
+        client.post("/messages/inbound", json=message2),
+        return_exceptions=True,
+    )
+
+    claimed_count = 0
+    already_claimed_count = 0
+
+    for response in responses:
+        if isinstance(response, Exception):
+            continue
+        status = response.json()["status"]
+        if status == "shift_claimed":
+            claimed_count += 1
+        elif status == "shift_already_claimed":
+            already_claimed_count += 1
+
+    assert claimed_count == 1
+    assert already_claimed_count == 1
+
+    db_instance = get_db()
+    fanout = db_instance.fanouts.get(shift_id)
+    assert fanout.status == ShiftFanoutStatus.CLAIMED
+    assert fanout.claimed_by in [
+        "b7e6a0f4-4c32-44dd-8a6d-ec6b7e9477da",
+        "c3d4e5f6-g7h8-9012-cdef-345678901234",
+    ]
