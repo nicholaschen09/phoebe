@@ -11,7 +11,7 @@ from pydantic import BaseModel
 class Shift(BaseModel):
     id: str
     organization_id: str
-    role_required: str  # e.g., "RN", "LPN", "CNA"
+    role_required: str
     start_time: datetime
     end_time: datetime
 
@@ -19,14 +19,14 @@ class Shift(BaseModel):
 class Caregiver(BaseModel):
     id: str
     name: str
-    role: str  # e.g., "RN", "LPN", "CNA"
+    role: str
     phone: str
 
 
 class ShiftFanoutStatus(StrEnum):
-    PENDING = "pending"  # SMS sent, waiting for response
-    CLAIMED = "claimed"  # A caregiver has accepted
-    ESCALATED = "escalated"  # Phone calls sent
+    PENDING = "pending"
+    CLAIMED = "claimed"
+    ESCALATED = "escalated"
 
 
 class ShiftFanout(BaseModel):
@@ -34,11 +34,11 @@ class ShiftFanout(BaseModel):
 
     shift_id: str
     status: ShiftFanoutStatus
-    created_at: datetime  # When fanout was initiated
-    claimed_by: str | None = None  # Caregiver ID who claimed it
+    created_at: datetime
+    claimed_by: str | None = None
     sms_sent_at: datetime | None = None
     phone_call_sent_at: datetime | None = None
-    contacted_caregiver_ids: list[str] = []  # For idempotency
+    contacted_caregiver_ids: list[str] = []
 
 
 class InboundMessage(BaseModel):
