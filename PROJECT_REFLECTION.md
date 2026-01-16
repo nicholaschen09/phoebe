@@ -16,4 +16,8 @@ for the escalation logic i set up a background task that waits 10 minutes after 
 
 the tests were pretty straightforward - i tested the happy paths like successful fanout and claiming shifts, edge cases like unknown caregivers and no matching roles, and the race condition scenarios. the escalation tests were tricky at first because i tried using freezegun to manipulate time but it doesnt play nice with asyncio. ended up just using a configurable delay which worked better.
 
+for llm tools i used cursor with claude's opus 4.5 model to help me write the code faster. it was especially helpful for writing the tests and figuring out the asyncio stuff. when i ran into the freezegun issue with asyncio it helped me debug why the tests were hanging and come up with the configurable delay solution. i also used it to make sure i was handling all the edge cases properly.
+
+also shoutout to uv - this was my first time using it and its so much faster than pip. running tests with `uv run pytest` just works without having to worry about virtual environments. definitely going to use it for future projects.
+
 overall i think the design is pretty clean and handles the requirements well. the main tradeoff i made was using in-memory locks instead of something more robust like database locks, but the assumptions said we only have one instance running so it should be fine and that was given in the boilerplate code so i just continued with what i started with.
