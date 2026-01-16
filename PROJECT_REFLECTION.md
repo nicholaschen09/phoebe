@@ -32,4 +32,6 @@ for llm tools i used cursor with claude's opus 4.5 model to help me write the co
 
 also shoutout to uv - this was my first time using it and its so much faster than pip. running tests with `uv run pytest` just works without having to worry about virtual environments. definitely going to use it for future projects.
 
-overall i think the design is pretty clean and handles the requirements well. the main tradeoff i made was using in-memory locks instead of something more robust like database locks, but the assumptions said we only have one instance running so it should be fine and that was given in the boilerplate code so i just continued with what i started with.
+overall i think the design is pretty clean and handles the requirements well. the main tradeoff i made was using in-memory locks instead of something more robust like database locks, but the assumptions said we only have one instance running so it should be fine and that was in the boilerplate code so i just continued with what i started with..
+
+i enjoyed working on this project, the problem feels practical and like something that would actually be used in production. the requirements were clear but still left room for me to make my own design decisions which i appreciated. if i had more time i would add things like tracking which caregivers declined so they dont get contacted again for the same shift, or sending a confirmation message back to the caregiver after they successfully claim a shift.
